@@ -104,7 +104,7 @@ namespace iText7core
                                 //add annot to every first page
                                 PdfDocument pdfAnnot = new PdfDocument(new PdfReader(currentPdf), new PdfWriter(annotPdfFile));
                                 pdfAnnot.GetFirstPage().AddAnnotation(new PdfTextAnnotation(new iText.Kernel.Geom.Rectangle(0, 0, 0, 0))
-                                    .SetTitle(new PdfString("DOC_BREAK"))
+                                    .SetTitle(new PdfString("BREAK"))
                                     .SetContents(Path.GetFileName(mergeIndex[i])));
                                 pdfAnnot.Close();
                                 currentPdf = annotPdfFile;
