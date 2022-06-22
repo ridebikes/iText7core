@@ -9,6 +9,10 @@ using System.IO;
 using System.Collections.Generic;
 using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Utils;
+using iText.Kernel.Geom;
+using iText.Kernel.Pdf.Canvas;
+using iText.Kernel.Pdf.Xobject;
+using iText.Kernel.Pdf.Canvas.Parser;
 
 namespace iText7core
 {
@@ -72,14 +76,13 @@ namespace iText7core
 
             if (args[0] == "merge")
             {
-                string inputDirectory = @"C:\Projects\iText7\input\mergedir\";
+                string inputDirectory = @"C:\Projects\iText7\input\";
                 string workDirectory = @"C:\Projects\iText7\workdir\";
                 string outputFile = @"C:\Projects\iText7\output\merged.pdf";
                 List<string> mergeIndex = new List<string>();
 
-                //code to concat PDF's
+                //code to merge PDF's
                 DateTime actionStartTime = DateTime.Now;
-                Console.WriteLine($"Starting merge of Pdf's in Directory {inputDirectory}");
 
                 //get the directory listing of pdf's to merge into a list
                 DirectoryInfo inputDirectoryInfo = new DirectoryInfo(inputDirectory);
@@ -97,15 +100,15 @@ namespace iText7core
                         {
                             // keep track of what PDF we are running in case it crashes
                             string currentPdf = mergeIndex[i];
-                            string annotPdfFile = $@"{workDirectory}{Path.GetFileNameWithoutExtension(mergeIndex[i])}.annot.pdf";
+                            string annotPdfFile = $@"{workDirectory}{System.IO.Path.GetFileNameWithoutExtension(mergeIndex[i])}.annot.pdf";
 
                             try
                             {
                                 //add annot to every first page
                                 PdfDocument pdfAnnot = new PdfDocument(new PdfReader(currentPdf), new PdfWriter(annotPdfFile));
                                 pdfAnnot.GetFirstPage().AddAnnotation(new PdfTextAnnotation(new iText.Kernel.Geom.Rectangle(0, 0, 0, 0))
-                                    .SetTitle(new PdfString("FirstPage"))
-                                    .SetContents(Path.GetFileName(mergeIndex[i])));
+                                    .SetTitle(new PdfString("PDF_BREAK"))
+                                    .SetContents(System.IO.Path.GetFileName(mergeIndex[i])));
                                 pdfAnnot.Close();
                                 currentPdf = annotPdfFile;
 
@@ -124,10 +127,279 @@ namespace iText7core
                     }
                 }
 
-                Console.WriteLine($"iText PDF Merge completed in {DateTime.Now.Subtract(actionStartTime):c} for Directory {inputDirectory}");
+                Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
             }
 
             #endregion
+
+            #region Strip and Save a directory of pdf's
+
+            if (args[0] == "stripsave")
+            {
+                string inputDirectory = @"C:\Projects\iText7\input\";
+                string workDirectory = @"C:\Projects\iText7\workdir\";
+                string outputDirectory = $@"C:\Projects\iText7\output\";
+
+                List<string> pdfIndex = new List<string>();
+
+                DateTime actionStartTime = DateTime.Now;
+
+                DirectoryInfo inputDirectoryInfo = new DirectoryInfo(inputDirectory);
+                foreach (FileInfo pdfFile in inputDirectoryInfo.GetFiles("*.pdf"))
+                {
+                    pdfIndex.Add(pdfFile.FullName);
+                }
+
+                for (int i = 0; i < pdfIndex.Count; i++)
+                {
+                    // keep track of what PDF we are running in case it crashes
+                    string currentPdf = pdfIndex[i];
+                    string annotPdfFile = $@"{workDirectory}{System.IO.Path.GetFileNameWithoutExtension(pdfIndex[i])}.annot.pdf";
+
+                    //Strip annot from every page
+                    PdfDocument pdfAnnotStripper = new PdfDocument(new PdfReader(currentPdf), new PdfWriter(annotPdfFile));
+
+                    for (int j = 1; j <= pdfAnnotStripper.GetNumberOfPages(); j++)
+                    {
+                        foreach (PdfAnnotation annotation in pdfAnnotStripper.GetPage(j).GetAnnotations())
+                        {
+                            pdfAnnotStripper.GetPage(j).RemoveAnnotation(annotation);
+                        }
+                    }
+                    pdfAnnotStripper.GetOutlines(true).RemoveOutline();
+                    pdfAnnotStripper.Close();
+                    currentPdf = annotPdfFile;
+
+                    string outputFile = $@"{outputDirectory}{System.IO.Path.GetFileName(currentPdf)}";
+
+                    // smartmode is a good pdf saver
+                    using (PdfWriter thisWriter = new PdfWriter(outputFile, new WriterProperties().UseSmartMode()))
+                    {
+                        using (PdfDocument thisDocument = new PdfDocument(thisWriter))
+                        {
+                            PdfMerger mergedPDF = new PdfMerger(thisDocument);
+                            PdfDocument sourceDocument = new PdfDocument(new PdfReader(currentPdf));
+                            mergedPDF.Merge(sourceDocument, 1, sourceDocument.GetNumberOfPages());
+                            sourceDocument.Close();
+                            mergedPDF.Close();
+                        }
+                    }
+                }
+
+                Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
+            }
+
+            #endregion
+
+            #region ScaleAndRotate
+
+            if (args[0] == "scaleandrotate")
+            {
+                string inputDirectory = @"C:\Projects\iText7\input\";
+                string outputDirectory = $@"C:\Projects\iText7\output\";
+                float pageWidth = 612;
+                float pageHeight = 792;
+
+                List<string> pdfIndex = new List<string>();
+                DateTime actionStartTime = DateTime.Now;
+
+                DirectoryInfo inputDirectoryInfo = new DirectoryInfo(inputDirectory);
+                foreach (FileInfo pdfFile in inputDirectoryInfo.GetFiles("*.pdf"))
+                {
+                    pdfIndex.Add(pdfFile.FullName);
+                }
+
+                for (int i = 0; i < pdfIndex.Count; i++)
+                {
+                    string currentPdf = pdfIndex[i];
+                    string outputFile = $@"{outputDirectory}{System.IO.Path.GetFileName(currentPdf)}";
+
+                    // using iText 7.1.12 with Affine Transform
+                    // https://api.itextpdf.com/iText7/dotnet/7.1.12/classi_text_1_1_kernel_1_1_geom_1_1_affine_transform.html
+
+                    PageSize targetSize = new PageSize(new Rectangle(pageWidth, pageHeight));
+
+                    using (PdfReader inputReader = new PdfReader(pdfIndex[i]))
+                    {
+                        using (PdfDocument inputDocument = new PdfDocument(inputReader))
+                        {
+                            using (PdfWriter outputWriter = new PdfWriter(outputFile))
+                            {
+                                using (PdfDocument outputDocument = new PdfDocument(outputWriter))
+                                {
+                                    for (int j = 1; j <= inputDocument.GetNumberOfPages(); j++)
+                                    {
+                                        PdfPage origPage = inputDocument.GetPage(j);
+
+                                        Rectangle thisRectangle = origPage.GetPageSize();
+
+                                        PageSize thisSize = new PageSize(thisRectangle);
+
+                                        bool needsRotated = (thisSize.GetHeight() >= thisSize.GetWidth()) != (targetSize.GetHeight() >= targetSize.GetWidth());
+
+                                        PageSize rotatedSize = thisSize;
+
+                                        if (needsRotated)
+                                        {
+                                            rotatedSize = new PageSize(new Rectangle(thisSize.GetHeight(), thisSize.GetWidth()));
+                                        }
+
+                                        PdfPage destPage = outputDocument.AddNewPage(targetSize);
+                                        AffineTransform transformationMatrix = new AffineTransform();
+
+                                        //double scale = Math.Min(targetSize.GetWidth() / rotatedSize.GetWidth(), targetSize.GetHeight() / rotatedSize.GetHeight());
+                                        double scaleX = targetSize.GetWidth() / rotatedSize.GetWidth();
+                                        double scaleY = targetSize.GetHeight() / rotatedSize.GetHeight();
+
+                                        //solimar runs scale and shift, so we are going to scale, but to nothing
+                                        transformationMatrix = AffineTransform.GetScaleInstance(scaleX, scaleY);
+
+                                        if (needsRotated)
+                                        {
+                                            //rotate the page (in Radians)
+                                            transformationMatrix = AffineTransform.GetRotateInstance(Math.PI / 2, thisSize.GetHeight() / 2, thisSize.GetWidth() / 2);
+                                        }
+
+                                        //create canvas
+                                        PdfCanvas destCanvas = new PdfCanvas(destPage);
+
+                                        //run Affine config
+                                        destCanvas.ConcatMatrix(transformationMatrix);
+
+                                        //grab page data as FormXObject
+                                        PdfFormXObject origCopy = origPage.CopyAsFormXObject(outputDocument);
+
+                                        float X = (float)((targetSize.GetWidth() - thisSize.GetWidth() * scaleX) / 2);
+                                        float Y = (float)((targetSize.GetHeight() - thisSize.GetHeight() * scaleY) / 2);
+
+                                        //add to our canvas
+                                        destCanvas.AddXObjectAt(origCopy, X, Y);
+
+                                        //finalize canvas for next iteration
+                                        destCanvas = new PdfCanvas(destPage);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                }
+
+                Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
+            }
+
+
+            #endregion
+
+            #region Convert to text
+
+            if (args[0] == "text")
+            {
+                string inputDirectory = @"C:\Projects\iText7\input\";
+                string outputDirectory = $@"C:\Projects\iText7\output\";
+
+                List<string> pdfIndex = new List<string>();
+                DateTime actionStartTime = DateTime.Now;
+
+                DirectoryInfo inputDirectoryInfo = new DirectoryInfo(inputDirectory);
+                foreach (FileInfo pdfFile in inputDirectoryInfo.GetFiles("*.pdf"))
+                {
+                    pdfIndex.Add(pdfFile.FullName);
+                }
+
+                for (int i = 0; i < pdfIndex.Count; i++)
+                {
+                    string currentPdf = pdfIndex[i];
+                    string outputFile = $@"{outputDirectory}{System.IO.Path.GetFileName(currentPdf)}";
+
+                    using (PdfDocument inputPDF = new PdfDocument(new PdfReader(currentPdf)))
+                    {
+                        using (StreamWriter outputText = new StreamWriter(outputFile))
+                        {
+                            for (int j = 1; j <= inputPDF.GetNumberOfPages(); j++)
+                            {
+                                var page = inputPDF.GetPage(j);
+                                outputText.WriteLine();
+                                outputText.WriteLine($"||P{j:0000000000}||");
+                                outputText.WriteLine();
+                                outputText.WriteLine(PdfTextExtractor.GetTextFromPage(page));
+                            }
+
+                            outputText.Close();
+                        }
+                    }
+                }
+
+                Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
+            }
+            #endregion
+
+            #region Split a PDF with an index
+
+            if (args[0] == "split")
+            {
+                string inputFile = @"C:\Projects\iText7\input\filetosplit.pdf";
+                List<SplitIndex> splitIndex = new List<SplitIndex>();
+
+                DateTime actionStartTime = DateTime.Now;
+
+                using (PdfDocument inputPdf = new PdfDocument(new PdfReader(inputFile)))
+                {
+
+                    foreach (SplitIndex index in splitIndex)
+                    {
+                        try
+                        {
+                            var split = new ImprovedSplitter(inputPdf, PageRange => new PdfWriter(index.FileName));
+                            var result = split.ExtractPageRange(new PageRange($"{index.FirstPage}-{index.LastPage}"));
+                            result.Close();
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Something went wrong : {e.Message}");
+                        }
+                    }
+                }
+
+                Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
+            }
         }
+
+        internal class ImprovedSplitter : PdfSplitter
+        {
+            private Func<PageRange, PdfWriter> nextWriter;
+            public ImprovedSplitter(PdfDocument pdfDocument, Func<PageRange, PdfWriter> nextWriter) : base(pdfDocument)
+            {
+                this.nextWriter = nextWriter;
+            }
+
+            protected override PdfWriter GetNextPdfWriter(PageRange documentPageRange)
+            {
+                return nextWriter.Invoke(documentPageRange);
+            }
+        }
+
+        #endregion
+
+        internal class SplitIndex
+        {
+            public int Counter { get; set; }
+
+            public string FileName { get; set; }
+
+            public int FirstPage { get; set; }
+
+            public int LastPage { get; set; }
+
+            public int PageRange
+            {
+                get
+                {
+                    return this.LastPage - this.FirstPage;
+                }
+            }
+        }
+
     }
+}
 }
