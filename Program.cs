@@ -132,7 +132,7 @@ namespace iText7core
 
             #endregion
 
-            #region Strip and Save a directory of pdf's
+            #region Strip, Flatten and Save a directory of pdf's
 
             if (args[0] == "stripsave")
             {
@@ -155,6 +155,7 @@ namespace iText7core
                     // keep track of what PDF we are running in case it crashes
                     string currentPdf = pdfIndex[i];
                     string annotPdfFile = $@"{workDirectory}{System.IO.Path.GetFileNameWithoutExtension(pdfIndex[i])}.annot.pdf";
+                    string acroformPdfFile = $@"{workDirectory}{System.IO.Path.GetFileNameWithoutExtension(pdfIndex[i])}.acroform.pdf";
 
                     //Strip annot from every page
                     PdfDocument pdfAnnotStripper = new PdfDocument(new PdfReader(currentPdf), new PdfWriter(annotPdfFile));
@@ -169,6 +170,15 @@ namespace iText7core
                     pdfAnnotStripper.GetOutlines(true).RemoveOutline();
                     pdfAnnotStripper.Close();
                     currentPdf = annotPdfFile;
+                    
+                    //flatten Acroforms
+                    using (PdfDocument pdfFlattener = new PdfDocument(new PdfReader(currentPdf), new PdfWriter(acroformPdfFile)))
+                    {
+                        PdfAcroForm thisForm = PdfAcroForm.GetAcroForm(pdfFlattener, true);
+                        thisForm.FlattenFields();
+                        pdfFlattener.Close();
+                        currentPdf = acroformPdfFile;
+                    }
 
                     string outputFile = $@"{outputDirectory}{System.IO.Path.GetFileName(currentPdf)}";
 
@@ -334,6 +344,70 @@ namespace iText7core
             }
             #endregion
 
+            #region Add an Image to a PDF
+
+            if (args[0] == "addimage")
+            {
+                DateTime actionStartTime = DateTime.Now;
+
+                string inputDirectory = @"C:\Projects\iText7\input\image\";
+                string outputDirectory = $@"C:\Projects\iText7\output\image\";
+                string imageToAdd = @"C:\Projects\iText7\input\image\myImage.jpg";
+                int pageNumber = 1;
+                float leftPos = 0;
+                float bottomPos = 400;
+                float pageHeight;
+                float pageWidth;
+                float degreesRotation = 0;
+
+
+                List<string> pdfIndex = new List<string>();
+                
+                DirectoryInfo inputDirectoryInfo = new DirectoryInfo(inputDirectory);
+                foreach (FileInfo pdfFile in inputDirectoryInfo.GetFiles("*.pdf"))
+                {
+                    pdfIndex.Add(pdfFile.FullName);
+                }
+
+                for (int i = 0; i < pdfIndex.Count; i++)
+                {
+                    string currentPdf = pdfIndex[i];
+                    string outputFile = $@"{outputDirectory}{System.IO.Path.GetFileName(currentPdf)}";
+
+                    using (PdfReader inputReader = new PdfReader(pdfIndex[i]))
+                    {
+                        using (PdfDocument inputDocument = new PdfDocument(inputReader))
+                        {
+                            using (PdfWriter outputWriter = new PdfWriter(outputFile))
+                            {
+                                using (PdfDocument outputDocument = new PdfDocument(outputWriter))
+                                {
+                                    using (PdfReader thisReader = new PdfReader(currentPdf))
+                                    {
+                                        PdfPage origPage = inputDocument.GetPage(1);
+                                        Rectangle thisRectangle = origPage.GetPageSize();
+                                        pageHeight = thisRectangle.GetHeight();
+                                        pageWidth = thisRectangle.GetWidth();
+
+                                        Document thisDoc = new Document(outputDocument);
+                                        Image thisImage = new Image(ImageDataFactory.Create(imageToAdd))
+                                            .SetFixedPosition(pageNumber, leftPos, bottomPos)
+                                            .SetRotationAngle(degreesRotation * (Math.PI / 180))
+                                            .ScaleToFit(pageWidth, pageHeight);
+                                        thisDoc.Add(thisImage);
+                                        thisDoc.Close();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Console.WriteLine($"iText processing completed in {DateTime.Now.Subtract(actionStartTime):c}");
+                }
+            }
+
+
+            #endregion    
+                
             #region Split a PDF with an index
 
             if (args[0] == "split")
