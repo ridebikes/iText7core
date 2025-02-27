@@ -1,3 +1,5 @@
+<meta name="google-site-verification" content="I7lb5I5Fq5nU0OLxOZJOfpBX6MWtzl6PtkRRckyYZro" />
+
 # iText7core
 This is an example of how to make a PDF from scratch, merge, strip, save, scale, rotate, convert to text and split.
 Make a PDF is to create a brand new PDF from nothing.
